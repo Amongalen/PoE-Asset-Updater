@@ -264,6 +264,7 @@ namespace PoEAssetUpdater
 				//stats-local.json -> Likely/maintained created manually.
 				ExportWords(assetIndex, datDefinitions, assetOutputDir);
 				ExportAnnointments(assetIndex, datDefinitions, assetOutputDir);
+				ExportUniqueArtNameMapping(assetIndex, datDefinitions, assetOutputDir);
 			}
 #if !DEBUG
 			catch(Exception ex)
@@ -1438,6 +1439,61 @@ namespace PoEAssetUpdater
 
 			return category;
 		}
+		
+		private static void ExportUniqueArtNameMapping(AssetIndex assetIndex, DatDefinitions datDefinitions, string exportDir)
+		{
+			ExportDataFile(assetIndex, Path.Combine(exportDir, "unique-artname-mapping.json"), WriteRecords, true);
+
+			void WriteRecords(List<AssetFile> dataFiles, JsonWriter jsonWriter)
+			{
+				var wordsDatContainers = GetLanguageDataFiles(dataFiles, datDefinitions, "Words.dat");
+				
+				var uniqueStashLayoutDatContainer = GetDatFile(dataFiles, datDefinitions, "UniqueStashLayout.dat");
+				var itemVisualIdentityDatContainer = GetDatFile(dataFiles, datDefinitions, "ItemVisualIdentity.dat");
+
+				if(uniqueStashLayoutDatContainer == null)
+				{
+					return;
+				}
+
+				foreach(var language in AllLanguages)
+				{	
+					if (!wordsDatContainers.ContainsKey(language))
+					{
+						continue;
+					}
+
+					jsonWriter.WritePropertyName(language.ToString());
+					jsonWriter.WriteStartObject();
+					var wordsDatContainer = wordsDatContainers[language][0];
+
+					foreach(var record in uniqueStashLayoutDatContainer.Records){
+						var wordsKey = (int)record.GetValue<ulong>("WordsKey");
+						var artName = GetArtName(record);
+						var name = wordsDatContainer.Records[wordsKey].GetValue<string>("Text");
+						jsonWriter.WritePropertyName(name);
+						jsonWriter.WriteValue(artName);
+					}
+					jsonWriter.WriteEndObject();
+				}
+
+				string GetArtName(DatRecord record)
+				{
+					if(!record.TryGetValue<ulong>("ItemVisualIdentityKey", out ulong itemVisualIdentityKey))
+					{
+						return string.Empty;
+					}
+					var itemVisualIdentity = itemVisualIdentityDatContainer.Records[(int)itemVisualIdentityKey];
+
+					if(itemVisualIdentity == null)
+					{
+						return string.Empty;
+					}
+					string ddsFileName = itemVisualIdentity.GetValue<string>("DDSFile");
+					return ddsFileName.Substring(0, ddsFileName.Length - 4);
+				}				
+			}			
+		}
 
 		private static void ExportBaseItemTypesV2(AssetIndex assetIndex, DatDefinitions datDefinitions, string exportDir)
 		{
@@ -1486,7 +1542,7 @@ namespace PoEAssetUpdater
 
 					var names = baseItemTypesDatContainers.ToDictionary(kvp => kvp.Key, kvp => Escape(kvp.Value[0].Records[i].GetValue<string>("Name").Trim()));
 
-					WriteRecord(id, names, GetArtNameById(id), category, baseItemType.GetValue<int>("Width"), baseItemType.GetValue<int>("Height"));
+					WriteRecord(id, names, GetArtName(baseItemType), category, baseItemType.GetValue<int>("Width"), baseItemType.GetValue<int>("Height"));
 				}
 
 				// Write the Prophecies
@@ -1521,7 +1577,7 @@ namespace PoEAssetUpdater
 						return Escape(name);
 					});
 
-					WriteRecord(id, names, GetArtNameById(id), ItemCategory.Prophecy, 1, 1);
+					WriteRecord(id, names, GetArtName(prophecy), ItemCategory.Prophecy, 1, 1);
 				}
 
 				// Write the Monster Varieties
@@ -1532,7 +1588,7 @@ namespace PoEAssetUpdater
 
 					var names = monsterVarietiesDatContainers.ToDictionary(kvp => kvp.Key, kvp => Escape(kvp.Value[0].Records[i].GetValue<string>("Name").Trim()));
 
-					WriteRecord(id, names, GetArtNameById(id), ItemCategory.MonsterBeast, 1, 1);
+					WriteRecord(id, names, GetArtName(monsterVariety), ItemCategory.MonsterBeast, 1, 1);
 				}
 
 				// Write the Unique Map Names
@@ -1545,14 +1601,17 @@ namespace PoEAssetUpdater
 					string id = itemVisualIdentity.GetValue<string>("Id");
 					var names = uniqueMapsDatContainers.ToDictionary(kvp => kvp.Key, kvp => Escape(kvp.Value[0].Records[i].GetValue<string>("Name").Trim()));
 
-					WriteRecord(id, names, GetArtName(itemVisualIdentity), ItemCategory.Map, 1, 1);
+					WriteRecord(id, names, GetArtName(uniqueMap), ItemCategory.Map, 1, 1);
 				}
 
-				// Nested Method(s)
-				string GetArtNameById(string id) => GetArtName(itemVisualIdentityDatContainer.Records.FirstOrDefault(x => x.GetValue<string>("Id") == id));
-
-				string GetArtName(DatRecord itemVisualIdentity)
+				string GetArtName(DatRecord record)
 				{
+					if(!record.TryGetValue<ulong>("ItemVisualIdentityKey", out ulong itemVisualIdentityKey))
+					{
+						return string.Empty;
+					}
+					var itemVisualIdentity = itemVisualIdentityDatContainer.Records[(int)itemVisualIdentityKey];
+
 					if(itemVisualIdentity == null)
 					{
 						return string.Empty;
